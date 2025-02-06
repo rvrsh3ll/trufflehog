@@ -4,8 +4,8 @@ import (
 	"context"
 	b64 "encoding/base64"
 	"fmt"
+	regexp "github.com/wasilibs/go-re2"
 	"net/http"
-	"regexp"
 	"strings"
 
 	"github.com/trufflesecurity/trufflehog/v3/pkg/common"
@@ -13,15 +13,17 @@ import (
 	"github.com/trufflesecurity/trufflehog/v3/pkg/pb/detectorspb"
 )
 
-type Scanner struct{}
+type Scanner struct {
+	detectors.DefaultMultiPartCredentialProvider
+}
 
-// Ensure the Scanner satisfies the interface at compile time
+// Ensure the Scanner satisfies the interface at compile time.
 var _ detectors.Detector = (*Scanner)(nil)
 
 var (
 	client = common.SaneHttpClient()
 
-	//Make sure that your group is surrounded in boundry characters such as below to reduce false positives
+	// Make sure that your group is surrounded in boundary characters such as below to reduce false positives.
 	keyPat  = regexp.MustCompile(detectors.PrefixRegex([]string{"textmagic"}) + `\b([0-9A-Za-z]{30})\b`)
 	userPat = regexp.MustCompile(detectors.PrefixRegex([]string{"textmagic"}) + `\b([0-9A-Za-z]{1,25})\b`)
 )
@@ -40,20 +42,15 @@ func (s Scanner) FromData(ctx context.Context, verify bool, data []byte) (result
 	userMatches := userPat.FindAllStringSubmatch(dataStr, -1)
 
 	for _, match := range matches {
-		if len(match) != 2 {
-			continue
-		}
 		resMatch := strings.TrimSpace(match[1])
 
 		for _, userMatch := range userMatches {
-			if len(match) != 2 {
-				continue
-			}
 			resUser := strings.TrimSpace(userMatch[1])
 
 			s1 := detectors.Result{
 				DetectorType: detectorspb.DetectorType_Textmagic,
 				Raw:          []byte(resMatch),
+				RawV2:        []byte(resMatch + resUser),
 			}
 
 			if verify {
@@ -70,11 +67,6 @@ func (s Scanner) FromData(ctx context.Context, verify bool, data []byte) (result
 					defer res.Body.Close()
 					if res.StatusCode >= 200 && res.StatusCode < 300 {
 						s1.Verified = true
-					} else {
-						//This function will check false positives for common test words, but also it will make sure the key appears 'random' enough to be a real key
-						if detectors.IsKnownFalsePositive(resMatch, detectors.DefaultFalsePositives, true) {
-							continue
-						}
 					}
 				}
 			}
@@ -83,5 +75,13 @@ func (s Scanner) FromData(ctx context.Context, verify bool, data []byte) (result
 		}
 	}
 
-	return detectors.CleanResults(results), nil
+	return results, nil
+}
+
+func (s Scanner) Type() detectorspb.DetectorType {
+	return detectorspb.DetectorType_Textmagic
+}
+
+func (s Scanner) Description() string {
+	return "Textmagic is a service for sending and receiving text messages. Textmagic API keys can be used to access and manage text messaging services."
 }

@@ -2,14 +2,12 @@ package elasticemail
 
 import (
 	"context"
-	// "log"
-	"regexp"
+	"encoding/json"
+	"io"
+	"net/http"
 	"strings"
 
-	// "fmt"
-	"encoding/json"
-	"io/ioutil"
-	"net/http"
+	regexp "github.com/wasilibs/go-re2"
 
 	"github.com/trufflesecurity/trufflehog/v3/pkg/common"
 	"github.com/trufflesecurity/trufflehog/v3/pkg/detectors"
@@ -18,7 +16,7 @@ import (
 
 type Scanner struct{}
 
-// Ensure the Scanner satisfies the interface at compile time
+// Ensure the Scanner satisfies the interface at compile time.
 var _ detectors.Detector = (*Scanner)(nil)
 
 var (
@@ -40,9 +38,6 @@ func (s Scanner) FromData(ctx context.Context, verify bool, data []byte) (result
 	matches := keyPat.FindAllStringSubmatch(dataStr, -1)
 
 	for _, match := range matches {
-		if len(match) != 2 {
-			continue
-		}
 		resMatch := strings.TrimSpace(match[1])
 
 		s1 := detectors.Result{
@@ -56,42 +51,31 @@ func (s Scanner) FromData(ctx context.Context, verify bool, data []byte) (result
 				continue
 			}
 			res, err := client.Do(req)
-			if err != nil {
-				continue
-			}
-			defer res.Body.Close()
-			var byteData []byte
-			_, err = res.Body.Read(byteData)
-			if err != nil {
-				continue
-			}
-
-			defer res.Body.Close()
-			data, readErr := ioutil.ReadAll(res.Body)
-			if readErr != nil {
-				continue
-			}
-			var ResVar struct {
-				Success bool `json:"success"`
-			}
-			if err := json.Unmarshal(data, &ResVar); err != nil {
-				continue
-			}
-			if ResVar.Success {
-				s1.Verified = true
-			} else {
-
-				if detectors.IsKnownFalsePositive(resMatch, detectors.DefaultFalsePositives, true) {
-					continue
+			if err == nil {
+				data, readErr := io.ReadAll(res.Body)
+				res.Body.Close()
+				if readErr == nil {
+					var ResVar struct {
+						Success bool `json:"success"`
+					}
+					if err := json.Unmarshal(data, &ResVar); err == nil {
+						if ResVar.Success {
+							s1.Verified = true
+						}
+					}
 				}
 			}
 		}
 
 		results = append(results, s1)
 	}
-	return detectors.CleanResults(results), nil
+	return results, nil
 }
-func prettyPrint(i interface{}) string {
-	s, _ := json.MarshalIndent(i, "", "\t")
-	return string(s)
+
+func (s Scanner) Type() detectorspb.DetectorType {
+	return detectorspb.DetectorType_ElasticEmail
+}
+
+func (s Scanner) Description() string {
+	return "ElasticEmail is an email marketing service. ElasticEmail API keys can be used to send emails, manage contacts, and access other features of the service."
 }

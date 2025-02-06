@@ -6,29 +6,31 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"net/url"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
+
+	regexp "github.com/wasilibs/go-re2"
 
 	"github.com/trufflesecurity/trufflehog/v3/pkg/common"
 	"github.com/trufflesecurity/trufflehog/v3/pkg/detectors"
 	"github.com/trufflesecurity/trufflehog/v3/pkg/pb/detectorspb"
 )
 
-type Scanner struct{}
+type Scanner struct {
+	detectors.DefaultMultiPartCredentialProvider
+}
 
-// Ensure the Scanner satisfies the interface at compile time
+// Ensure the Scanner satisfies the interface at compile time.
 var _ detectors.Detector = (*Scanner)(nil)
 
 var (
 	client = common.SaneHttpClient()
 
-	//Make sure that your group is surrounded in boundry characters such as below to reduce false positives
+	// Make sure that your group is surrounded in boundary characters such as below to reduce false positives.
 	keyPat    = regexp.MustCompile(detectors.PrefixRegex([]string{"cexio", "cex.io"}) + `\b([0-9A-Za-z]{24,27})\b`)
 	secretPat = regexp.MustCompile(detectors.PrefixRegex([]string{"cexio", "cex.io"}) + `\b([0-9A-Za-z]{24,27})\b`)
 	userIdPat = regexp.MustCompile(detectors.PrefixRegex([]string{"cexio", "cex.io"}) + `\b([a-z]{2}[0-9]{9})\b`)
@@ -49,26 +51,18 @@ func (s Scanner) FromData(ctx context.Context, verify bool, data []byte) (result
 	userIdMatches := userIdPat.FindAllStringSubmatch(dataStr, -1)
 
 	for _, userIdMatch := range userIdMatches {
-		if len(userIdMatch) != 2 {
-			continue
-		}
 		resUserIdMatch := strings.TrimSpace(userIdMatch[1])
 
 		for _, keyMatch := range keyMatches {
-			if len(keyMatch) != 2 {
-				continue
-			}
 			resKeyMatch := strings.TrimSpace(keyMatch[1])
 
 			for _, secretMatch := range secretMatches {
-				if len(secretMatch) != 2 {
-					continue
-				}
 				resSecretMatch := strings.TrimSpace(secretMatch[1])
 
 				s1 := detectors.Result{
 					DetectorType: detectorspb.DetectorType_CexIO,
 					Raw:          []byte(resKeyMatch),
+					RawV2:        []byte(resUserIdMatch + resSecretMatch),
 				}
 
 				if verify {
@@ -91,34 +85,20 @@ func (s Scanner) FromData(ctx context.Context, verify bool, data []byte) (result
 					if err == nil {
 						defer res.Body.Close()
 
-						body, err := ioutil.ReadAll(res.Body)
+						body, err := io.ReadAll(res.Body)
 						if err != nil {
 							continue
 						}
 						bodyString := string(body)
 						validResponse := strings.Contains(bodyString, `timestamp`)
-						if err != nil {
-							fmt.Print(err.Error())
-						}
 
 						var responseObject Response
-						json.Unmarshal(body, &responseObject)
+						if err := json.Unmarshal(body, &responseObject); err != nil {
+							continue
+						}
 
 						if res.StatusCode >= 200 && res.StatusCode < 300 && validResponse {
 							s1.Verified = true
-						} else {
-							//This function will check false positives for common test words, but also it will make sure the key appears 'random' enough to be a real key
-							if detectors.IsKnownFalsePositive(resUserIdMatch, detectors.DefaultFalsePositives, true) {
-								continue
-							}
-
-							if detectors.IsKnownFalsePositive(resKeyMatch, detectors.DefaultFalsePositives, true) {
-								continue
-							}
-
-							if detectors.IsKnownFalsePositive(resSecretMatch, detectors.DefaultFalsePositives, true) {
-								continue
-							}
 						}
 					}
 				}
@@ -128,7 +108,7 @@ func (s Scanner) FromData(ctx context.Context, verify bool, data []byte) (result
 		}
 	}
 
-	return detectors.CleanResults(results), nil
+	return results, nil
 }
 
 type Response struct {
@@ -142,4 +122,12 @@ func getCexIOPassphrase(apiSecret string, apiKey string, nonce string, userId st
 	mac.Write([]byte(msg))
 	macsum := mac.Sum(nil)
 	return strings.ToUpper(hex.EncodeToString(macsum))
+}
+
+func (s Scanner) Type() detectorspb.DetectorType {
+	return detectorspb.DetectorType_CexIO
+}
+
+func (s Scanner) Description() string {
+	return "CexIO is a cryptocurrency exchange platform. CexIO API keys can be used to access and manage cryptocurrency accounts and transactions."
 }

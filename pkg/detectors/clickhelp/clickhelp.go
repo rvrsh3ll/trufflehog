@@ -5,23 +5,26 @@ import (
 	b64 "encoding/base64"
 	"fmt"
 	"net/http"
-	"regexp"
 	"strings"
+
+	regexp "github.com/wasilibs/go-re2"
 
 	"github.com/trufflesecurity/trufflehog/v3/pkg/common"
 	"github.com/trufflesecurity/trufflehog/v3/pkg/detectors"
 	"github.com/trufflesecurity/trufflehog/v3/pkg/pb/detectorspb"
 )
 
-type Scanner struct{}
+type Scanner struct {
+	detectors.DefaultMultiPartCredentialProvider
+}
 
-// Ensure the Scanner satisfies the interface at compile time
+// Ensure the Scanner satisfies the interface at compile time.
 var _ detectors.Detector = (*Scanner)(nil)
 
 var (
 	client = common.SaneHttpClient()
 
-	//Make sure that your group is surrounded in boundry characters such as below to reduce false positives
+	// Make sure that your group is surrounded in boundary characters such as below to reduce false positives.
 	serverPat = regexp.MustCompile(`\b([0-9A-Za-z]{3,20}.try.clickhelp.co)\b`)
 	emailPat  = regexp.MustCompile(`\b([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+\.[a-z]+)\b`)
 	keyPat    = regexp.MustCompile(detectors.PrefixRegex([]string{"clickhelp"}) + `\b([0-9A-Za-z]{24})\b`)
@@ -42,25 +45,17 @@ func (s Scanner) FromData(ctx context.Context, verify bool, data []byte) (result
 	keyMatches := keyPat.FindAllStringSubmatch(dataStr, -1)
 
 	for _, match := range serverMatches {
-		if len(match) != 2 {
-			continue
-		}
 		resServer := strings.TrimSpace(match[1])
 
 		for _, emailMatch := range emailMatches {
-			if len(emailMatch) != 2 {
-				continue
-			}
 			resEmail := strings.TrimSpace(emailMatch[1])
 			for _, keyMatch := range keyMatches {
-				if len(keyMatch) != 2 {
-					continue
-				}
 				resKey := strings.TrimSpace(keyMatch[1])
 
 				s1 := detectors.Result{
 					DetectorType: detectorspb.DetectorType_ClickHelp,
 					Raw:          []byte(resServer),
+					RawV2:        []byte(resServer + resEmail),
 				}
 
 				if verify {
@@ -77,11 +72,6 @@ func (s Scanner) FromData(ctx context.Context, verify bool, data []byte) (result
 						defer res.Body.Close()
 						if res.StatusCode >= 200 && res.StatusCode < 300 {
 							s1.Verified = true
-						} else {
-							//This function will check false positives for common test words, but also it will make sure the key appears 'random' enough to be a real key
-							if detectors.IsKnownFalsePositive(resServer, detectors.DefaultFalsePositives, true) {
-								continue
-							}
 						}
 					}
 				}
@@ -91,5 +81,13 @@ func (s Scanner) FromData(ctx context.Context, verify bool, data []byte) (result
 		}
 	}
 
-	return detectors.CleanResults(results), nil
+	return results, nil
+}
+
+func (s Scanner) Type() detectorspb.DetectorType {
+	return detectorspb.DetectorType_ClickHelp
+}
+
+func (s Scanner) Description() string {
+	return "ClickHelp is a documentation tool that allows users to create and manage online documentation. ClickHelp API keys can be used to access and modify documentation data."
 }

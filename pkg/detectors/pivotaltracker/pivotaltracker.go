@@ -2,18 +2,17 @@ package pivotaltracker
 
 import (
 	"context"
+	regexp "github.com/wasilibs/go-re2"
 	"net/http"
-	"regexp"
-
-	"github.com/trufflesecurity/trufflehog/v3/pkg/detectors"
-	"github.com/trufflesecurity/trufflehog/v3/pkg/pb/detectorspb"
 
 	"github.com/trufflesecurity/trufflehog/v3/pkg/common"
+	"github.com/trufflesecurity/trufflehog/v3/pkg/detectors"
+	"github.com/trufflesecurity/trufflehog/v3/pkg/pb/detectorspb"
 )
 
 type Scanner struct{}
 
-// Ensure the Scanner satisfies the interface at compile time
+// Ensure the Scanner satisfies the interface at compile time.
 var _ detectors.Detector = (*Scanner)(nil)
 
 var (
@@ -36,13 +35,10 @@ func (s Scanner) FromData(ctx context.Context, verify bool, data []byte) (result
 	for _, match := range matches {
 
 		// First match is entire regex, second is the first group.
-		if len(match) != 2 {
-			continue
-		}
 
 		token := match[1]
 
-		s := detectors.Result{
+		result := detectors.Result{
 			DetectorType: detectorspb.DetectorType_PivotalTracker,
 			Raw:          []byte(token),
 		}
@@ -57,24 +53,25 @@ func (s Scanner) FromData(ctx context.Context, verify bool, data []byte) (result
 			req.Header.Add("Content-Type", "application/json; charset=utf-8")
 			req.Header.Add("X-TrackerToken", token)
 			res, err := client.Do(req)
-			if err != nil {
-				break
-			}
-			defer res.Body.Close()
-			if res.StatusCode >= 200 && res.StatusCode < 300 {
-				s.Verified = true
-			}
+			if err == nil {
+				res.Body.Close() // The request body is unused.
 
-		}
-
-		if !s.Verified {
-			if detectors.IsKnownFalsePositive(string(s.Raw), detectors.DefaultFalsePositives, true) {
-				continue
+				if res.StatusCode >= 200 && res.StatusCode < 300 {
+					result.Verified = true
+				}
 			}
 		}
 
-		results = append(results, s)
+		results = append(results, result)
 	}
 
-	return
+	return results, nil
+}
+
+func (s Scanner) Type() detectorspb.DetectorType {
+	return detectorspb.DetectorType_PivotalTracker
+}
+
+func (s Scanner) Description() string {
+	return "PivotalTracker is a project management tool. PivotalTracker tokens can be used to access and manage projects and data within PivotalTracker."
 }

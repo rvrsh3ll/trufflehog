@@ -3,8 +3,8 @@ package avazapersonalaccesstoken
 import (
 	"context"
 	"fmt"
+	regexp "github.com/wasilibs/go-re2"
 	"net/http"
-	"regexp"
 	"strings"
 
 	"github.com/trufflesecurity/trufflehog/v3/pkg/common"
@@ -14,14 +14,14 @@ import (
 
 type Scanner struct{}
 
-// Ensure the Scanner satisfies the interface at compile time
+// Ensure the Scanner satisfies the interface at compile time.
 var _ detectors.Detector = (*Scanner)(nil)
 
 var (
 	client = common.SaneHttpClient()
 
-	//Make sure that your group is surrounded in boundry characters such as below to reduce false positives
-	//The number prefix increments for every Personal Access Token created.
+	// Make sure that your group is surrounded in boundary characters such as below to reduce false positives.
+	// The number prefix increments for every Personal Access Token created.
 	keyPat = regexp.MustCompile(detectors.PrefixRegex([]string{"avaza"}) + `\b([0-9]+-[0-9a-f]{40})\b`)
 )
 
@@ -38,9 +38,6 @@ func (s Scanner) FromData(ctx context.Context, verify bool, data []byte) (result
 	matches := keyPat.FindAllStringSubmatch(dataStr, -1)
 
 	for _, match := range matches {
-		if len(match) != 2 {
-			continue
-		}
 		resMatch := strings.TrimSpace(match[1])
 
 		s1 := detectors.Result{
@@ -49,7 +46,7 @@ func (s Scanner) FromData(ctx context.Context, verify bool, data []byte) (result
 		}
 
 		if verify {
-			req, err := http.NewRequest("GET", "https://api.avaza.com/api/Account", nil)
+			req, err := http.NewRequestWithContext(ctx, "GET", "https://api.avaza.com/api/Account", nil)
 			if err != nil {
 				continue
 			}
@@ -59,11 +56,6 @@ func (s Scanner) FromData(ctx context.Context, verify bool, data []byte) (result
 				defer res.Body.Close()
 				if res.StatusCode >= 200 && res.StatusCode < 300 {
 					s1.Verified = true
-				} else {
-					//This function will check false positives for common test words, but also it will make sure the key appears 'random' enough to be a real key
-					if detectors.IsKnownFalsePositive(resMatch, detectors.DefaultFalsePositives, true) {
-						continue
-					}
 				}
 			}
 		}
@@ -71,5 +63,13 @@ func (s Scanner) FromData(ctx context.Context, verify bool, data []byte) (result
 		results = append(results, s1)
 	}
 
-	return detectors.CleanResults(results), nil
+	return results, nil
+}
+
+func (s Scanner) Type() detectorspb.DetectorType {
+	return detectorspb.DetectorType_AvazaPersonalAccessToken
+}
+
+func (s Scanner) Description() string {
+	return "Avaza is a business management tool that offers project management, time tracking, and financial management. Avaza Personal Access Tokens can be used to access and interact with Avaza's API."
 }

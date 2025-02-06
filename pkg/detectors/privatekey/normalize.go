@@ -4,9 +4,7 @@ import (
 	"strings"
 )
 
-const b64chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/="
-
-func normalize(in string) string {
+func Normalize(in string) string {
 	in = strings.ReplaceAll(in, `"`, "")
 	in = strings.ReplaceAll(in, `'`, "")
 	in = strings.ReplaceAll(in, "\t", "")

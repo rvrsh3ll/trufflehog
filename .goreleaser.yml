@@ -1,18 +1,34 @@
+version: 2
 builds:
-  - binary: trufflehog
+  - id: trufflehog-upx
+    binary: trufflehog
+    ldflags:
+      - -s -w -X 'github.com/trufflesecurity/trufflehog/v3/pkg/version.BuildVersion={{ .Version }}'
+    env: [CGO_ENABLED=0]
+    goos:
+    - linux
+    goarch:
+    - amd64
+    - arm64
+    hooks:
+      post:
+        - upx -q "{{ .Path }}"
+  - id: trufflehog
+    binary: trufflehog
     ldflags:
       - -X 'github.com/trufflesecurity/trufflehog/v3/pkg/version.BuildVersion={{ .Version }}'
     env: [CGO_ENABLED=0]
     goos:
-    - linux
-    - windows
     - darwin
+    - windows
     goarch:
     - amd64
     - arm64
 dockers:
   - image_templates: ["trufflesecurity/{{ .ProjectName }}:{{ .Version }}-amd64"]
     dockerfile: Dockerfile.goreleaser
+    extra_files:
+    - entrypoint.sh
     use: buildx
     build_flag_templates:
     - --platform=linux/amd64
@@ -26,6 +42,8 @@ dockers:
   - image_templates: ["trufflesecurity/{{ .ProjectName }}:{{ .Version }}-arm64v8"]
     goarch: arm64
     dockerfile: Dockerfile.goreleaser
+    extra_files:
+    - entrypoint.sh
     use: buildx
     build_flag_templates:
     - --platform=linux/arm64/v8
@@ -38,6 +56,8 @@ dockers:
     - --label=org.opencontainers.image.licenses=AGPL-3.0
   - image_templates: ["ghcr.io/trufflesecurity/{{ .ProjectName }}:{{ .Version }}-amd64"]
     dockerfile: Dockerfile.goreleaser
+    extra_files:
+    - entrypoint.sh
     use: buildx
     build_flag_templates:
     - --platform=linux/amd64
@@ -51,6 +71,8 @@ dockers:
   - image_templates: ["ghcr.io/trufflesecurity/{{ .ProjectName }}:{{ .Version }}-arm64v8"]
     goarch: arm64
     dockerfile: Dockerfile.goreleaser
+    extra_files:
+    - entrypoint.sh
     use: buildx
     build_flag_templates:
     - --platform=linux/arm64/v8
@@ -78,3 +100,25 @@ docker_manifests:
     image_templates:
     - ghcr.io/trufflesecurity/{{ .ProjectName }}:{{ .Version }}-amd64
     - ghcr.io/trufflesecurity/{{ .ProjectName }}:{{ .Version }}-arm64v8
+brews:
+  - repository:
+      owner: trufflesecurity
+      name: homebrew-trufflehog
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    description: "Find credentials all over the place"
+    name: "trufflehog"
+    homepage: "https://github.com/trufflesecurity/trufflehog"
+    install: |
+      bin.install "trufflehog"
+signs:
+  - cmd: cosign
+    signature: "${artifact}.sig"
+    certificate: "${artifact}.pem"
+    args: 
+      - "sign-blob"
+      - "--oidc-issuer=https://token.actions.githubusercontent.com"
+      - "--output-certificate=${certificate}"
+      - "--output-signature=${signature}"
+      - "${artifact}"
+      - "--yes"
+    artifacts: checksum

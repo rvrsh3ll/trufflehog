@@ -1,15 +1,17 @@
 package main
 
 import (
-	"io/ioutil"
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
 	"strings"
 	"text/template"
 
+	"github.com/alecthomas/kingpin/v2"
 	"github.com/go-errors/errors"
-	"gopkg.in/alecthomas/kingpin.v2"
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 )
 
 var (
@@ -24,7 +26,7 @@ func main() {
 	log.SetPrefix("😲 [generate] ")
 
 	kingpin.MustParse(app.Parse(os.Args[1:]))
-	nameTitle = strings.Title(*name)
+	nameTitle = cases.Title(language.AmericanEnglish).String(*name)
 	nameLower = strings.ToLower(*name)
 	nameUpper = strings.ToUpper(*name)
 
@@ -32,14 +34,19 @@ func main() {
 	case "detector":
 		mustWriteTemplates([]templateJob{
 			{
-				TemplatePath:  "pkg/detectors/heroku/heroku.go",
+				TemplatePath:  "pkg/detectors/alchemy/alchemy.go",
 				WritePath:     filepath.Join(folderPath(), nameLower+".go"),
-				ReplaceString: []string{"heroku"},
+				ReplaceString: []string{"alchemy"},
 			},
 			{
-				TemplatePath:  "pkg/detectors/heroku/heroku_test.go",
+				TemplatePath:  "pkg/detectors/alchemy/alchemy_test.go",
 				WritePath:     filepath.Join(folderPath(), nameLower+"_test.go"),
-				ReplaceString: []string{"heroku"},
+				ReplaceString: []string{"alchemy"},
+			},
+			{
+				TemplatePath:  "pkg/detectors/alchemy/alchemy_integration_test.go",
+				WritePath:     filepath.Join(folderPath(), nameLower+"_integration_test.go"),
+				ReplaceString: []string{"alchemy"},
 			},
 		})
 		// case "source":
@@ -65,7 +72,7 @@ type templateJob struct {
 }
 
 func mustWriteTemplates(jobs []templateJob) {
-	log.Printf("Generating %s %s\n", strings.Title(*kind), nameTitle)
+	log.Printf("Generating %s %s\n", cases.Title(language.AmericanEnglish).String(*kind), nameTitle)
 
 	// Make the folder.
 	log.Printf("Creating folder %s\n", folderPath())
@@ -76,15 +83,17 @@ func mustWriteTemplates(jobs []templateJob) {
 
 	// Write the files from templates.
 	for _, job := range jobs {
-		tmplBytes, err := ioutil.ReadFile(job.TemplatePath)
+		tmplBytes, err := os.ReadFile(job.TemplatePath)
 		if err != nil {
 			log.Fatal(err)
 		}
 		tmplRaw := string(tmplBytes)
 
 		for _, rplString := range job.ReplaceString {
+			rplTitle := cases.Title(language.AmericanEnglish).String(rplString)
+			tmplRaw = strings.ReplaceAll(tmplRaw, "DetectorType_"+rplTitle, "DetectorType_<<.Name>>")
 			tmplRaw = strings.ReplaceAll(tmplRaw, strings.ToLower(rplString), "<<.NameLower>>")
-			tmplRaw = strings.ReplaceAll(tmplRaw, strings.Title(rplString), "<<.NameTitle>>")
+			tmplRaw = strings.ReplaceAll(tmplRaw, rplTitle, "<<.NameTitle>>")
 			tmplRaw = strings.ReplaceAll(tmplRaw, strings.ToUpper(rplString), "<<.NameUpper>>")
 		}
 
@@ -95,15 +104,20 @@ func mustWriteTemplates(jobs []templateJob) {
 		if err != nil {
 			log.Fatal(err)
 		}
-		tmpl.Execute(f, templateData{
+		err = tmpl.Execute(f, templateData{
+			Name:      *name,
 			NameTitle: nameTitle,
 			NameLower: nameLower,
 			NameUpper: nameUpper,
 		})
+		if err != nil {
+			log.Fatal(fmt.Errorf("failed to execute template: %w", err))
+		}
 	}
 }
 
 type templateData struct {
+	Name      string
 	NameTitle string
 	NameLower string
 	NameUpper string

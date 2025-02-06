@@ -4,17 +4,17 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"regexp"
 
-	"github.com/trufflesecurity/trufflehog/v3/pkg/detectors"
-	"github.com/trufflesecurity/trufflehog/v3/pkg/pb/detectorspb"
+	regexp "github.com/wasilibs/go-re2"
 
 	"github.com/trufflesecurity/trufflehog/v3/pkg/common"
+	"github.com/trufflesecurity/trufflehog/v3/pkg/detectors"
+	"github.com/trufflesecurity/trufflehog/v3/pkg/pb/detectorspb"
 )
 
 type Scanner struct{}
 
-// Ensure the Scanner satisfies the interface at compile time
+// Ensure the Scanner satisfies the interface at compile time.
 var _ detectors.Detector = (*Scanner)(nil)
 
 var (
@@ -36,7 +36,7 @@ func (s Scanner) FromData(ctx context.Context, verify bool, data []byte) (result
 
 	for _, match := range matches {
 
-		s := detectors.Result{
+		result := detectors.Result{
 			DetectorType: detectorspb.DetectorType_Dropbox,
 			Raw:          []byte(match[1]),
 		}
@@ -53,27 +53,28 @@ func (s Scanner) FromData(ctx context.Context, verify bool, data []byte) (result
 			}
 			req.Header.Add("Authorization", fmt.Sprintf("Bearer %s", match[1]))
 			res, err := client.Do(req)
-			if err != nil {
-				return results, err
-			}
-			defer res.Body.Close()
+			if err == nil {
+				res.Body.Close() // The request body is unused.
 
-			// 200 means good key for get current user
-			// 400 is bad (malformed)
-			// 403 bad scope
-			if res.StatusCode == http.StatusOK {
-				s.Verified = true
-			}
-		}
-
-		if !s.Verified {
-			if detectors.IsKnownFalsePositive(string(s.Raw), detectors.DefaultFalsePositives, true) {
-				continue
+				// 200 means good key for get current user
+				// 400 is bad (malformed)
+				// 403 bad scope
+				if res.StatusCode == http.StatusOK {
+					result.Verified = true
+				}
 			}
 		}
 
-		results = append(results, s)
+		results = append(results, result)
 	}
 
 	return
+}
+
+func (s Scanner) Type() detectorspb.DetectorType {
+	return detectorspb.DetectorType_Dropbox
+}
+
+func (s Scanner) Description() string {
+	return "Dropbox is a file hosting service that offers cloud storage, file synchronization, personal cloud, and client software. Dropbox API keys can be used to access and manage files and folders in a Dropbox account."
 }

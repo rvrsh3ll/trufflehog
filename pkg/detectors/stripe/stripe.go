@@ -4,22 +4,22 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"regexp"
 
-	"github.com/trufflesecurity/trufflehog/v3/pkg/detectors"
-	"github.com/trufflesecurity/trufflehog/v3/pkg/pb/detectorspb"
+	regexp "github.com/wasilibs/go-re2"
 
 	"github.com/trufflesecurity/trufflehog/v3/pkg/common"
+	"github.com/trufflesecurity/trufflehog/v3/pkg/detectors"
+	"github.com/trufflesecurity/trufflehog/v3/pkg/pb/detectorspb"
 )
 
 type Scanner struct{}
 
-// Ensure the Scanner satisfies the interface at compile time
+// Ensure the Scanner satisfies the interface at compile time.
 var _ detectors.Detector = (*Scanner)(nil)
 
 var (
-	//doesnt include test keys with "sk_test"
-	secretKey = regexp.MustCompile(`[rs]k_live_[a-zA-Z0-9]{20,30}`)
+	// doesn't include test keys with "sk_test"
+	secretKey = regexp.MustCompile(`[rs]k_live_[a-zA-Z0-9]{20,247}`)
 )
 
 // Keywords are used for efficiently pre-filtering chunks.
@@ -37,9 +37,12 @@ func (s Scanner) FromData(ctx context.Context, verify bool, data []byte) (result
 
 	for _, match := range matches {
 
-		s := detectors.Result{
+		result := detectors.Result{
 			DetectorType: detectorspb.DetectorType_Stripe,
 			Raw:          []byte(match),
+		}
+		result.ExtraData = map[string]string{
+			"rotation_guide": "https://howtorotate.com/docs/tutorials/stripe/",
 		}
 
 		if verify {
@@ -56,24 +59,26 @@ func (s Scanner) FromData(ctx context.Context, verify bool, data []byte) (result
 			req.Header.Add("Authorization", fmt.Sprintf("Bearer %s", match))
 			req.Header.Add("Content-Type", "application/json")
 			res, err := client.Do(req)
-			if err != nil {
-				return results, err
-			}
-			defer res.Body.Close()
+			if err == nil {
+				res.Body.Close() // The request body is unused.
 
-			if res.StatusCode == http.StatusOK || res.StatusCode == http.StatusForbidden {
-				s.Verified = true
+				if res.StatusCode == http.StatusOK || res.StatusCode == http.StatusForbidden {
+					result.Verified = true
+				}
 			}
+			result.AnalysisInfo = map[string]string{"key": match}
 		}
 
-		if !s.Verified {
-			if detectors.IsKnownFalsePositive(string(s.Raw), detectors.DefaultFalsePositives, true) {
-				continue
-			}
-		}
-
-		results = append(results, s)
+		results = append(results, result)
 	}
 
 	return
+}
+
+func (s Scanner) Type() detectorspb.DetectorType {
+	return detectorspb.DetectorType_Stripe
+}
+
+func (s Scanner) Description() string {
+	return "Stripe is a payment processing platform. Stripe API keys can be used to interact with Stripe's services for processing payments, managing subscriptions, and more."
 }

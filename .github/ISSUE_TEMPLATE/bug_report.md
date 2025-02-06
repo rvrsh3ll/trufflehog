@@ -6,28 +6,49 @@ labels: bug, needs triage
 assignees: trufflesecurity/product-eng
 ---
 
-**Describe the bug**
-A clear and concise description of what the bug is.
+Please review the [Community Note](https://github.com/trufflesecurity/trufflehog/blob/main/.github/community_note.md) before submitting
 
-**To Reproduce**
-Steps to reproduce the behavior:
-1. Go to '...'
-2. Click on '....'
-3. Scroll down to '....'
-4. See error
+### TruffleHog Version
+<!--- Please run `trufflehog --version` to show the version. If you are not running the latest version, please upgrade because your issue may have already been fixed. --->
 
-**Expected behavior**
-A clear and concise description of what you expected to happen.
+### Trace Output
 
-**Output**
-Please include relevant log output, and run with the `--debug` flag.
+<!---
+Please provide a link to a GitHub Gist containing the complete debug output. Please do NOT paste the debug output in the issue; just paste a link to the Gist.
 
-**Screenshots**
-If applicable, add screenshots to help explain your problem.
+To obtain the trace output, run trufflehog with the --log-level=5 flag.
+--->
 
-**Desktop (please complete the following information):**
- - OS: [e.g. iOS]
- - Version [e.g. 22]
+### Expected Behavior
 
-**Additional context**
-Add any other context about the problem here.
+<!--- What should have happened? --->
+
+### Actual Behavior
+
+<!--- What actually happened? --->
+
+### Steps to Reproduce
+
+<!--- Please list the steps required to reproduce the issue. --->
+ 1. Go to '...'
+ 2. Click on '....'
+ 3. Scroll down to '....'
+ 4. See error
+
+## Environment
+ * OS: [e.g. iOS]
+ * Version [e.g. 22]
+
+## Additional Context
+<!--- Add any other context about the problem here. --->
+
+### References
+
+<!---
+Information about referencing Github Issues: https://help.github.com/articles/basic-writing-and-formatting-syntax/#referencing-issues-and-pull-requests
+
+Are there any other GitHub issues (open or closed) or pull requests that should be linked here? Vendor documentation? For example:
+--->
+
+* #0000
+

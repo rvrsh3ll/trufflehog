@@ -7,7 +7,6 @@ import (
 	"compress/gzip"
 	"encoding/json"
 	"io"
-	"io/ioutil"
 	"net/http"
 	"runtime"
 	"strings"
@@ -15,26 +14,25 @@ import (
 
 	"github.com/go-errors/errors"
 	"github.com/jpillora/overseer/fetcher"
-	log "github.com/sirupsen/logrus"
 
+	"github.com/trufflesecurity/trufflehog/v3/pkg/context"
 	"github.com/trufflesecurity/trufflehog/v3/pkg/version"
 )
 
-func Fetcher(version string) fetcher.Interface {
-	return &OSS{
-		CurrentVersion: version,
-	}
+func Fetcher(cmd string, tui bool) fetcher.Interface {
+	return &OSS{Cmd: cmd, TUI: tui}
 }
 
 type OSS struct {
-	Interval       time.Duration
-	CurrentVersion string
-	Updated        bool
+	Interval time.Duration
+	Cmd      string
+	TUI      bool
+	Updated  bool
 }
 
 // Init validates the provided config
 func (g *OSS) Init() error {
-	//initiate OSS connection
+	// initiate OSS connection
 	return nil
 }
 
@@ -44,6 +42,8 @@ type FormData struct {
 	OS             string
 	Arch           string
 	CurrentVersion string
+	Cmd            string
+	TUI            bool
 	Timezone       string
 	Binary         string
 }
@@ -60,6 +60,8 @@ func (g *OSS) Fetch() (io.Reader, error) {
 		OS:             runtime.GOOS,
 		Arch:           runtime.GOARCH,
 		CurrentVersion: version.BuildVersion,
+		Cmd:            g.Cmd,
+		TUI:            g.TUI,
 		Timezone:       zone,
 		Binary:         "trufflehog",
 	}
@@ -79,9 +81,9 @@ func (g *OSS) Fetch() (io.Reader, error) {
 		return nil, errors.New("already up to date")
 	}
 
-	log.Debug("fetching trufflehog update")
+	context.Background().Logger().V(2).Info("fetching trufflehog update")
 
-	newBinBytes, err := ioutil.ReadAll(resp.Body)
+	newBinBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
 	}

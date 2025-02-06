@@ -2,8 +2,9 @@ package surveybot
 
 import (
 	"context"
+	"encoding/json"
+	regexp "github.com/wasilibs/go-re2"
 	"net/http"
-	"regexp"
 	"strings"
 
 	"github.com/trufflesecurity/trufflehog/v3/pkg/common"
@@ -13,13 +14,13 @@ import (
 
 type Scanner struct{}
 
-// Ensure the Scanner satisfies the interface at compile time
+// Ensure the Scanner satisfies the interface at compile time.
 var _ detectors.Detector = (*Scanner)(nil)
 
 var (
 	client = common.SaneHttpClient()
 
-	//Make sure that your group is surrounded in boundry characters such as below to reduce false positives
+	// Make sure that your group is surrounded in boundary characters such as below to reduce false positives.
 	keyPat = regexp.MustCompile(detectors.PrefixRegex([]string{"surveybot"}) + `\b([A-Za-z0-9-]{80})\b`)
 )
 
@@ -29,6 +30,10 @@ func (s Scanner) Keywords() []string {
 	return []string{"surveybot"}
 }
 
+type response struct {
+	Surveys []interface{} `json:"surveys"`
+}
+
 // FromData will find and optionally verify SurveyBot secrets in a given set of bytes.
 func (s Scanner) FromData(ctx context.Context, verify bool, data []byte) (results []detectors.Result, err error) {
 	dataStr := string(data)
@@ -36,9 +41,6 @@ func (s Scanner) FromData(ctx context.Context, verify bool, data []byte) (result
 	matches := keyPat.FindAllStringSubmatch(dataStr, -1)
 
 	for _, match := range matches {
-		if len(match) != 2 {
-			continue
-		}
 		resMatch := strings.TrimSpace(match[1])
 
 		s1 := detectors.Result{
@@ -57,11 +59,13 @@ func (s Scanner) FromData(ctx context.Context, verify bool, data []byte) (result
 			if err == nil {
 				defer res.Body.Close()
 				if res.StatusCode >= 200 && res.StatusCode < 300 {
-					s1.Verified = true
-				} else {
-					//This function will check false positives for common test words, but also it will make sure the key appears 'random' enough to be a real key
-					if detectors.IsKnownFalsePositive(resMatch, detectors.DefaultFalsePositives, true) {
+					var r response
+					if err := json.NewDecoder(res.Body).Decode(&r); err != nil {
+						s1.SetVerificationError(err, resMatch)
 						continue
+					}
+					if len(r.Surveys) > 0 {
+						s1.Verified = true
 					}
 				}
 			}
@@ -70,5 +74,13 @@ func (s Scanner) FromData(ctx context.Context, verify bool, data []byte) (result
 		results = append(results, s1)
 	}
 
-	return detectors.CleanResults(results), nil
+	return results, nil
+}
+
+func (s Scanner) Type() detectorspb.DetectorType {
+	return detectorspb.DetectorType_SurveyBot
+}
+
+func (s Scanner) Description() string {
+	return "SurveyBot is a service used for conducting surveys. SurveyBot API keys can be used to access and manage surveys."
 }

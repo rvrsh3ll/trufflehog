@@ -3,24 +3,27 @@ package checkout
 import (
 	"context"
 	"net/http"
-	"regexp"
 	"strings"
+
+	regexp "github.com/wasilibs/go-re2"
 
 	"github.com/trufflesecurity/trufflehog/v3/pkg/common"
 	"github.com/trufflesecurity/trufflehog/v3/pkg/detectors"
 	"github.com/trufflesecurity/trufflehog/v3/pkg/pb/detectorspb"
 )
 
-type Scanner struct{}
+type Scanner struct {
+	detectors.DefaultMultiPartCredentialProvider
+}
 
-// Ensure the Scanner satisfies the interface at compile time
+// Ensure the Scanner satisfies the interface at compile time.
 var _ detectors.Detector = (*Scanner)(nil)
 
 var (
 	client = common.SaneHttpClient()
 
-	//Make sure that your group is surrounded in boundry characters such as below to reduce false positives
-	//Tokens starting with sk_test are used for the app's sandbox environment while tokens starting with sk only are for production environment
+	// Make sure that your group is surrounded in boundary characters such as below to reduce false positives.
+	// Tokens starting with sk_test are used for the app's sandbox environment while tokens starting with sk only are for production environment
 	keyPat = regexp.MustCompile(detectors.PrefixRegex([]string{"checkout"}) + `\b((sk_|sk_test_)[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\b`)
 	idPat  = regexp.MustCompile(detectors.PrefixRegex([]string{"checkout"}) + `\b(cus_[0-9a-zA-Z]{26})\b`)
 )
@@ -39,24 +42,19 @@ func (s Scanner) FromData(ctx context.Context, verify bool, data []byte) (result
 	idMatches := idPat.FindAllStringSubmatch(dataStr, -1)
 
 	for _, match := range matches {
-		if len(match) != 3 {
-			continue
-		}
 		resMatch := strings.TrimSpace(match[1])
 
 		for _, idMatch := range idMatches {
-			if len(idMatch) != 2 {
-				continue
-			}
 			resIdMatch := strings.TrimSpace(idMatch[1])
 
 			s1 := detectors.Result{
 				DetectorType: detectorspb.DetectorType_Checkout,
 				Raw:          []byte(resMatch),
+				RawV2:        []byte(resMatch + resIdMatch),
 			}
 
 			if verify {
-				//Used the app's sandbox environment for this case since I can't create a live account.
+				// Used the app's sandbox environment for this case since I can't create a live account.
 				req, err := http.NewRequestWithContext(ctx, "GET", "https://api.sandbox.checkout.com/customers/"+resIdMatch, nil)
 				if err != nil {
 					continue
@@ -67,11 +65,6 @@ func (s Scanner) FromData(ctx context.Context, verify bool, data []byte) (result
 					defer res.Body.Close()
 					if res.StatusCode >= 200 && res.StatusCode < 300 {
 						s1.Verified = true
-					} else {
-						//This function will check false positives for common test words, but also it will make sure the key appears 'random' enough to be a real key
-						if detectors.IsKnownFalsePositive(resMatch, detectors.DefaultFalsePositives, true) {
-							continue
-						}
 					}
 				}
 			}
@@ -80,5 +73,13 @@ func (s Scanner) FromData(ctx context.Context, verify bool, data []byte) (result
 		}
 	}
 
-	return detectors.CleanResults(results), nil
+	return results, nil
+}
+
+func (s Scanner) Type() detectorspb.DetectorType {
+	return detectorspb.DetectorType_Checkout
+}
+
+func (s Scanner) Description() string {
+	return "Checkout is a global payment solution provider. Checkout API keys can be used to process payments and manage customer data."
 }

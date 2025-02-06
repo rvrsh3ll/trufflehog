@@ -3,8 +3,8 @@ package onelogin
 import (
 	"context"
 	"fmt"
+	regexp "github.com/wasilibs/go-re2"
 	"net/http"
-	"regexp"
 	"strings"
 	"time"
 
@@ -12,9 +12,11 @@ import (
 	"github.com/trufflesecurity/trufflehog/v3/pkg/pb/detectorspb"
 )
 
-type Scanner struct{}
+type Scanner struct{
+	detectors.DefaultMultiPartCredentialProvider
+}
 
-// Ensure the Scanner satisfies the interface at compile time
+// Ensure the Scanner satisfies the interface at compile time.
 var _ detectors.Detector = (*Scanner)(nil)
 
 var (
@@ -39,17 +41,12 @@ func (s Scanner) FromData(ctx context.Context, verify bool, data []byte) (result
 	dataStr := string(data)
 
 	for _, clientID := range oauthClientIDPat.FindAllStringSubmatch(dataStr, -1) {
-		if len(clientID) != 2 {
-			continue
-		}
 		for _, clientSecret := range oauthClientSecretPat.FindAllStringSubmatch(dataStr, -1) {
-			if len(clientSecret) != 2 {
-				continue
-			}
 
-			s := detectors.Result{
+			result := detectors.Result{
 				DetectorType: detectorspb.DetectorType_OneLogin,
 				Raw:          []byte(clientID[1]),
+				RawV2:        []byte(fmt.Sprintf("%s:%s", clientID[1], clientSecret[1])),
 				Redacted:     clientID[1],
 			}
 
@@ -63,26 +60,27 @@ func (s Scanner) FromData(ctx context.Context, verify bool, data []byte) (result
 					req.Header.Add("Authorization", fmt.Sprintf("client_id:%s, client_secret:%s", clientID[1], clientSecret[1]))
 					req.Header.Add("Content-Type", "application/json; charset=utf-8")
 					res, err := client.Do(req)
-					if err != nil {
-						return results, err
-					}
-					defer res.Body.Close()
-					if res.StatusCode >= 200 && res.StatusCode < 300 {
-						s.Verified = true
-						break
+					if err == nil {
+						res.Body.Close() // The request body is unused.
+
+						if res.StatusCode >= 200 && res.StatusCode < 300 {
+							result.Verified = true
+						}
 					}
 				}
 			}
 
-			if !s.Verified {
-				if detectors.IsKnownFalsePositive(string(s.Raw), detectors.DefaultFalsePositives, true) {
-					continue
-				}
-			}
-
-			results = append(results, s)
+			results = append(results, result)
 		}
 	}
 
-	return
+	return results, nil
+}
+
+func (s Scanner) Type() detectorspb.DetectorType {
+	return detectorspb.DetectorType_OneLogin
+}
+
+func (s Scanner) Description() string {
+	return "OneLogin is an identity and access management provider. OneLogin OAuth client IDs and secrets can be used to authenticate and authorize API requests."
 }

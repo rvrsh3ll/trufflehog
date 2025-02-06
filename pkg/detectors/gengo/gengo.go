@@ -7,28 +7,31 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
+
+	regexp "github.com/wasilibs/go-re2"
 
 	"github.com/trufflesecurity/trufflehog/v3/pkg/common"
 	"github.com/trufflesecurity/trufflehog/v3/pkg/detectors"
 	"github.com/trufflesecurity/trufflehog/v3/pkg/pb/detectorspb"
 )
 
-type Scanner struct{}
+type Scanner struct {
+	detectors.DefaultMultiPartCredentialProvider
+}
 
-// Ensure the Scanner satisfies the interface at compile time
+// Ensure the Scanner satisfies the interface at compile time.
 var _ detectors.Detector = (*Scanner)(nil)
 
 var (
 	client = common.SaneHttpClient()
 
-	//Make sure that your group is surrounded in boundry characters such as below to reduce false positives
-	//Removed bounds since there are some cases where the start and end of the token is a special character
+	// Make sure that your group is surrounded in boundary characters such as below to reduce false positives.
+	// Removed bounds since there are some cases where the start and end of the token is a special character
 	keyPat    = regexp.MustCompile(detectors.PrefixRegex([]string{"gengo"}) + `([ ]{0,1}[0-9a-zA-Z\[\]\-\(\)\{\}|_^@$=~]{64}[ \r\n]{1})`)
 	secretPat = regexp.MustCompile(detectors.PrefixRegex([]string{"gengo"}) + `([ ]{0,1}[0-9a-zA-Z\[\]\-\(\)\{\}|_^@$=~]{64}[ \r\n]{1})`)
 )
@@ -47,20 +50,15 @@ func (s Scanner) FromData(ctx context.Context, verify bool, data []byte) (result
 	secretMatches := secretPat.FindAllStringSubmatch(dataStr, -1)
 
 	for _, match := range matches {
-		if len(match) != 2 {
-			continue
-		}
 		resMatch := strings.TrimSpace(match[1])
 
 		for _, secretMatch := range secretMatches {
-			if len(secretMatch) != 2 {
-				continue
-			}
 			resSecretMatch := strings.TrimSpace(secretMatch[1])
 
 			s1 := detectors.Result{
 				DetectorType: detectorspb.DetectorType_Gengo,
 				Raw:          []byte(resSecretMatch),
+				RawV2:        []byte(resMatch + resSecretMatch),
 			}
 
 			if verify {
@@ -76,23 +74,16 @@ func (s Scanner) FromData(ctx context.Context, verify bool, data []byte) (result
 				res, err := client.Do(req)
 				if err == nil {
 					defer res.Body.Close()
-					body, errBody := ioutil.ReadAll(res.Body)
+					body, errBody := io.ReadAll(res.Body)
 
 					if errBody == nil {
 						var response Response
-						json.Unmarshal(body, &response)
+						if err := json.Unmarshal(body, &response); err != nil {
+							continue
+						}
 
 						if res.StatusCode >= 200 && res.StatusCode < 300 && response.OpStat == "ok" {
 							s1.Verified = true
-						} else {
-							//This function will check false positives for common test words, but also it will make sure the key appears 'random' enough to be a real key
-							if detectors.IsKnownFalsePositive(resMatch, detectors.DefaultFalsePositives, true) {
-								continue
-							}
-
-							if detectors.IsKnownFalsePositive(resSecretMatch, detectors.DefaultFalsePositives, true) {
-								continue
-							}
 						}
 					}
 				}
@@ -102,7 +93,7 @@ func (s Scanner) FromData(ctx context.Context, verify bool, data []byte) (result
 		}
 	}
 
-	return detectors.CleanResults(results), nil
+	return results, nil
 }
 
 type Response struct {
@@ -115,4 +106,12 @@ func getGengoSignature(timeStamp string, secret string) string {
 	mac.Write([]byte(timeStamp))
 	macsum := mac.Sum(nil)
 	return hex.EncodeToString(macsum)
+}
+
+func (s Scanner) Type() detectorspb.DetectorType {
+	return detectorspb.DetectorType_Gengo
+}
+
+func (s Scanner) Description() string {
+	return "Gengo is a platform for professional human translation services. Gengo API keys can be used to access and manage translation projects and resources."
 }

@@ -3,19 +3,22 @@ package bitfinex
 import (
 	"context"
 	"flag"
-	"regexp"
+	"net/http"
 	"strings"
 
-	"github.com/bitfinexcom/bitfinex-api-go/v2/rest"
-	"github.com/trufflesecurity/trufflehog/v3/pkg/detectors"
+	regexp "github.com/wasilibs/go-re2"
 
+	"github.com/bitfinexcom/bitfinex-api-go/v2/rest"
 	"github.com/trufflesecurity/trufflehog/v3/pkg/common"
+	"github.com/trufflesecurity/trufflehog/v3/pkg/detectors"
 	"github.com/trufflesecurity/trufflehog/v3/pkg/pb/detectorspb"
 )
 
-type Scanner struct{}
+type Scanner struct {
+	detectors.DefaultMultiPartCredentialProvider
+}
 
-// Ensure the Scanner satisfies the interface at compile time
+// Ensure the Scanner satisfies the interface at compile time.
 var _ detectors.Detector = (*Scanner)(nil)
 
 var (
@@ -27,8 +30,7 @@ var (
 )
 
 var (
-	orderid = flag.String("id", "", "lookup trades for an order ID")
-	api     = flag.String("api", "https://api-pub.bitfinex.com/v2/", "v2 REST API URL")
+	api = flag.String("api", "https://api-pub.bitfinex.com/v2/", "v2 REST API URL")
 )
 
 // Keywords are used for efficiently pre-filtering chunks.
@@ -45,9 +47,6 @@ func (s Scanner) FromData(ctx context.Context, verify bool, data []byte) (result
 	apiSecretMatches := apiSecretPat.FindAllStringSubmatch(dataStr, -1)
 
 	for _, apiKeyMatch := range apiKeyMatches {
-		if len(apiKeyMatch) != 2 {
-			continue
-		}
 		apiKeyRes := strings.TrimSpace(apiKeyMatch[1])
 
 		s1 := detectors.Result{
@@ -56,9 +55,6 @@ func (s Scanner) FromData(ctx context.Context, verify bool, data []byte) (result
 		}
 
 		for _, apiSecretMatch := range apiSecretMatches {
-			if len(apiSecretMatch) != 2 {
-				continue
-			}
 			apiSecretRes := strings.TrimSpace(apiSecretMatch[1])
 
 			if apiKeyRes == apiSecretRes {
@@ -69,6 +65,7 @@ func (s Scanner) FromData(ctx context.Context, verify bool, data []byte) (result
 				// thankfully official golang examples exist but you just need to dig their many repos https://github.com/bitfinexcom/bitfinex-api-go/blob/master/examples/v2/rest-orders/main.go
 				key := apiKeyRes
 				secret := apiSecretRes
+				http.DefaultClient = client // filed https://github.com/bitfinexcom/bitfinex-api-go/issues/238 to improve this
 				c := rest.NewClientWithURL(*api).Credentials(key, secret)
 
 				isValid := true // assume valid
@@ -76,27 +73,31 @@ func (s Scanner) FromData(ctx context.Context, verify bool, data []byte) (result
 				if err != nil {
 					if strings.HasPrefix(err.Error(), "POST https://") { // eg POST https://api-pub.bitfinex.com/v2/auth/r/orders/hist: 500 apikey: digest invalid (10100)
 						isValid = false
-					} else {
-						if detectors.IsKnownFalsePositive(apiKeyRes, detectors.DefaultFalsePositives, true) {
-							continue
-						}
 					}
 				}
 
 				s1.Verified = isValid
 				// If there is a valid one, we need to stop iterating now and return the valid result
-				if isValid == true {
+				if isValid {
 					break
 				}
 			}
 		}
 
-		// By appending resutls in the outer loop we can reduce false positives if there are multiple
+		// By appending results in the outer loop we can reduce false positives if there are multiple
 		// combinations of secrets and IDs found.
 		if len(apiSecretMatches) > 0 {
 			results = append(results, s1)
 		}
 	}
 
-	return detectors.CleanResults(results), nil
+	return results, nil
+}
+
+func (s Scanner) Type() detectorspb.DetectorType {
+	return detectorspb.DetectorType_Bitfinex
+}
+
+func (s Scanner) Description() string {
+	return "Bitfinex is a cryptocurrency exchange offering various trading options. Bitfinex API keys can be used to access and manage trading accounts."
 }

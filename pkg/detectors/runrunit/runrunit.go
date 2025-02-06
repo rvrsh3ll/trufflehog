@@ -2,8 +2,8 @@ package runrunit
 
 import (
 	"context"
+	regexp "github.com/wasilibs/go-re2"
 	"net/http"
-	"regexp"
 	"strings"
 
 	"github.com/trufflesecurity/trufflehog/v3/pkg/common"
@@ -11,15 +11,17 @@ import (
 	"github.com/trufflesecurity/trufflehog/v3/pkg/pb/detectorspb"
 )
 
-type Scanner struct{}
+type Scanner struct {
+	detectors.DefaultMultiPartCredentialProvider
+}
 
-// Ensure the Scanner satisfies the interface at compile time
+// Ensure the Scanner satisfies the interface at compile time.
 var _ detectors.Detector = (*Scanner)(nil)
 
 var (
 	client = common.SaneHttpClient()
 
-	//Make sure that your group is surrounded in boundry characters such as below to reduce false positives
+	// Make sure that your group is surrounded in boundary characters such as below to reduce false positives.
 	keyPat       = regexp.MustCompile(detectors.PrefixRegex([]string{"runrunit"}) + `\b([0-9a-f]{32})\b`)
 	userTokenPat = regexp.MustCompile(detectors.PrefixRegex([]string{"runrunit"}) + `\b([0-9A-Za-z]{18,20})\b`)
 )
@@ -38,15 +40,9 @@ func (s Scanner) FromData(ctx context.Context, verify bool, data []byte) (result
 	userTokenMatches := userTokenPat.FindAllStringSubmatch(dataStr, -1)
 
 	for _, match := range matches {
-		if len(match) != 2 {
-			continue
-		}
 		resMatch := strings.TrimSpace(match[1])
 
 		for _, userTokenMatch := range userTokenMatches {
-			if len(userTokenMatch) != 2 {
-				continue
-			}
 			resUserTokenMatch := strings.TrimSpace(userTokenMatch[1])
 
 			s1 := detectors.Result{
@@ -66,15 +62,6 @@ func (s Scanner) FromData(ctx context.Context, verify bool, data []byte) (result
 					defer res.Body.Close()
 					if res.StatusCode >= 200 && res.StatusCode < 300 {
 						s1.Verified = true
-					} else {
-						//This function will check false positives for common test words, but also it will make sure the key appears 'random' enough to be a real key
-						if detectors.IsKnownFalsePositive(resMatch, detectors.DefaultFalsePositives, true) {
-							continue
-						}
-
-						if detectors.IsKnownFalsePositive(resUserTokenMatch, detectors.DefaultFalsePositives, true) {
-							continue
-						}
 					}
 				}
 			}
@@ -83,5 +70,13 @@ func (s Scanner) FromData(ctx context.Context, verify bool, data []byte) (result
 		}
 	}
 
-	return detectors.CleanResults(results), nil
+	return results, nil
+}
+
+func (s Scanner) Type() detectorspb.DetectorType {
+	return detectorspb.DetectorType_RunRunIt
+}
+
+func (s Scanner) Description() string {
+	return "RunRunIt is a project management tool. App-Key and User-Token can be used to access and modify project data."
 }

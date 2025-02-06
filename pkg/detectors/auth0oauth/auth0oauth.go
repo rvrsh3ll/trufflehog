@@ -2,31 +2,30 @@ package auth0oauth
 
 import (
 	"context"
-	// "fmt"
-	// "log"
-	"regexp"
-	"strings"
-
-	"io/ioutil"
+	"io"
 	"net/http"
 	"net/url"
+	"strings"
 
-	"github.com/trufflesecurity/trufflehog/v3/pkg/common"
+	regexp "github.com/wasilibs/go-re2"
+
 	"github.com/trufflesecurity/trufflehog/v3/pkg/detectors"
 	"github.com/trufflesecurity/trufflehog/v3/pkg/pb/detectorspb"
 )
 
-type Scanner struct{}
+type Scanner struct {
+	detectors.DefaultMultiPartCredentialProvider
+}
 
-// Ensure the Scanner satisfies the interface at compile time
+// Ensure the Scanner satisfies the interface at compile time.
 var _ detectors.Detector = (*Scanner)(nil)
 
 var (
-	client = common.SaneHttpClient()
+	client = detectors.DetectorHttpClientWithLocalAddresses
 
 	clientIdPat     = regexp.MustCompile(detectors.PrefixRegex([]string{"auth0"}) + `\b([a-zA-Z0-9_-]{32,60})\b`)
 	clientSecretPat = regexp.MustCompile(`\b([a-zA-Z0-9_-]{64,})\b`)
-	domainPat       = regexp.MustCompile(`\b([a-zA-Z0-9][a-zA-Z0-9._-]*auth0.com)\b`) // could be part of url
+	domainPat       = regexp.MustCompile(`\b([a-zA-Z0-9][a-zA-Z0-9._-]*auth0\.com)\b`) // could be part of url
 )
 
 // Keywords are used for efficiently pre-filtering chunks.
@@ -38,33 +37,27 @@ func (s Scanner) Keywords() []string {
 // FromData will find and optionally verify Auth0oauth secrets in a given set of bytes.
 func (s Scanner) FromData(ctx context.Context, verify bool, data []byte) (results []detectors.Result, err error) {
 	dataStr := string(data)
+	uniqueDomainMatches := make(map[string]struct{})
+	uniqueClientIDs := make(map[string]struct{})
+	uniqueSecrets := make(map[string]struct{})
+	for _, m := range domainPat.FindAllStringSubmatch(dataStr, -1) {
+		uniqueDomainMatches[strings.TrimSpace(m[1])] = struct{}{}
+	}
+	for _, m := range clientIdPat.FindAllStringSubmatch(dataStr, -1) {
+		uniqueClientIDs[strings.TrimSpace(m[1])] = struct{}{}
+	}
+	for _, m := range clientSecretPat.FindAllStringSubmatch(dataStr, -1) {
+		uniqueSecrets[strings.TrimSpace(m[1])] = struct{}{}
+	}
 
-	clientIdMatches := clientIdPat.FindAllStringSubmatch(dataStr, -1)
-	clientSecretMatches := clientSecretPat.FindAllStringSubmatch(dataStr, -1)
-	domainMatches := domainPat.FindAllStringSubmatch(dataStr, -1)
-
-	for _, clientIdMatch := range clientIdMatches {
-		if len(clientIdMatch) != 2 {
-			continue
-		}
-		clientIdRes := strings.TrimSpace(clientIdMatch[1])
-
-		for _, clientSecretMatch := range clientSecretMatches {
-			if len(clientSecretMatch) != 2 {
-				continue
-			}
-			clientSecretRes := strings.TrimSpace(clientSecretMatch[1])
-
-			for _, domainMatch := range domainMatches {
-				if len(domainMatch) != 2 {
-					continue
-				}
-				domainRes := strings.TrimSpace(domainMatch[1])
-
+	for clientIdRes := range uniqueClientIDs {
+		for clientSecretRes := range uniqueSecrets {
+			for domainRes := range uniqueDomainMatches {
 				s1 := detectors.Result{
 					DetectorType: detectorspb.DetectorType_Auth0oauth,
 					Redacted:     clientIdRes,
 					Raw:          []byte(clientSecretRes),
+					RawV2:        []byte(clientIdRes + clientSecretRes),
 				}
 
 				if verify {
@@ -90,7 +83,7 @@ func (s Scanner) FromData(ctx context.Context, verify bool, data []byte) (result
 					res, err := client.Do(req)
 					if err == nil {
 						defer res.Body.Close()
-						bodyBytes, err := ioutil.ReadAll(res.Body)
+						bodyBytes, err := io.ReadAll(res.Body)
 						if err != nil {
 							continue
 						}
@@ -102,12 +95,7 @@ func (s Scanner) FromData(ctx context.Context, verify bool, data []byte) (result
 
 						if !strings.Contains(body, "access_denied") {
 							s1.Verified = true
-						} else {
-							if detectors.IsKnownFalsePositive(clientIdRes, detectors.DefaultFalsePositives, true) {
-								continue
-							}
 						}
-
 					}
 				}
 
@@ -116,5 +104,13 @@ func (s Scanner) FromData(ctx context.Context, verify bool, data []byte) (result
 		}
 	}
 
-	return detectors.CleanResults(results), nil
+	return results, nil
+}
+
+func (s Scanner) Type() detectorspb.DetectorType {
+	return detectorspb.DetectorType_Auth0oauth
+}
+
+func (s Scanner) Description() string {
+	return "Auth0 is a service designed to handle authentication and authorization for users. Oauth API keys can be used to impersonate applications and other things related to Auth0's API"
 }

@@ -129,6 +129,13 @@ func TestFilterFromFile(t *testing.T) {
 			pattern:             "test",
 			pass:                false,
 		},
+		"EmptyLinesAreIgnored": {
+			includeFile:         false,
+			excludeFile:         true,
+			excludeFileContents: " \ntest.txt",
+			pattern:             "hello world.txt",
+			pass:                true,
+		},
 	}
 	for name, test := range tests {
 		var includeTestFile, excludeTestFile string
@@ -163,6 +170,9 @@ func testFilterWriteFile(filename string, content []byte) error {
 	if err != nil {
 		return err
 	}
-	f.Write(content)
+	_, err = f.Write(content)
+	if err != nil {
+		return err
+	}
 	return f.Close()
 }
